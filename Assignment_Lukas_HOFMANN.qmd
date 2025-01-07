@@ -1,0 +1,502 @@
+---
+title: "Assignment"
+author: "Lukas Hofmann"
+date: "2024-04-18"
+output: html_document
+---
+
+# Arnaud Leparmentier’s data
+
+> There is currently a strong controversy as to whether Europe is currently losing ground to the U.S. and if so, how much that is the case. You can see this at the beginning of this article by Arnaud Leparmentier: “In 2008, the eurozone and the US had equivalent gross domestic products (GDP) at current prices of \$14.2 trillion and \$14.8 trillion respectively (€13.1 trillion and €13.6 trillion). Fifteen years on, the eurozone’s GDP is just over \$15 trillion, while US GDP has soared to \$26.9 trillion.”
+
+[Link to the Article](https://www.lemonde.fr/en/opinion/article/2023/09/04/the-gdp-gap-between-europe-and-the-united-states-is-now-80_6123491_23.html)
+
+## 0 - Functions
+
+::: panel-tabset
+### General
+
+```{r global_options}
+figurenumber <- 1
+library(tidyverse)
+library(scales)
+library(WDI)
+library(cowplot)
+cEurozone5 <- c("FR", "DE", "GR","IT", "ES")
+cEurozone <- c("AT", "BE", "CY", "EE", 
+                    "FI", "FR", "DE", "GR", 
+                    "IE", "IT", "LV", "LT", 
+                    "LU", "MT", "NL", "PT", 
+                    "SK", "SI", "ES")
+cEurozoneUS <- c("US", "XC")
+cEUUS<- c("US", "EU")
+countryAll <- c(cEurozoneUS, cEurozone)
+
+```
+
+### GDP function
+
+```{r GdpTab}
+gdp <- function(title, indi, countries, bIndex = FALSE, indexindicator = NULL, bCapita = FALSE, capitaindicator = NULL, bUnemployment) {
+  data <- WDI(country =countries, indicator = indi) %>%
+    mutate(date = paste0(year, "-01-01") %>% as.Date()) %>%
+    filter(year >= 2008) %>%
+    filter(year <= 2022) %>%
+    group_by(country) %>%
+    rename(indicatorGDP = indi)
+  
+
+  if(!is.null(capitaindicator)) {
+    gdp <- data %>%
+      select(country,year,date,iso2c, indicatorGDP)
+    
+    capita <- WDI(country = countries, indicator = capitaindicator) %>%
+      filter(year >= 2008) %>%
+      filter(year <= 2022) %>%
+      rename(indicatorCap = capitaindicator) %>%
+      mutate(date = as.Date(paste0(year, "-01-01"))) %>%
+      select(country,year,date,iso2c, indicatorCap)
+    data <- merge(gdp, capita, by = c("country", "year","date", "iso2c")) %>%
+      group_by(country)
+  }
+  if (bIndex) {
+    if (!length(indexindicator)) {
+      if(bCapita) {
+        data <- data %>%
+          mutate(gdpcap = indicatorGDP/indicatorCap) %>%
+          mutate(indice = round((100 * gdpcap / gdpcap[year == 2008]), digits = 2))} 
+      else{
+        data <- data %>%
+          mutate(indice = round((100 * indicatorGDP / indicatorGDP[year == 2008]), digits = 2))}
+    } else {
+      if(bCapita) {
+        data <- ungroup(data)
+        data <- data %>%
+          mutate(gdpcap = indicatorGDP/indicatorCap) %>%
+          mutate(x = gdpcap[year == 2008 & iso2c == indexindicator]) %>%
+          group_by(country) %>%
+          mutate(indice = round((100 * gdpcap / x), digits = 2))} 
+      else{
+        data <- ungroup(data)
+        data <- data %>%
+          mutate(x = indicatorGDP[year == 2008 & iso2c == indexindicator]) %>%
+          group_by(country) %>%
+          mutate(indice = round((100 * indicatorGDP / x), digits = 2))}
+    }
+  } else {
+    if(bCapita) {
+      data <- data %>%
+          mutate(gdpcap = indicatorGDP/indicatorCap) %>%
+          mutate(indice = round(gdpcap, digits = 2))
+    }
+    else{
+      data <- data %>%
+        mutate(indice = round(indicatorGDP / 1000000000000,digits = 2))
+    }
+  }
+  
+  
+  title <- paste("Figure", figurenumber, ":", title)
+  graph <- data %>%
+    ggplot() + geom_line(aes(x = date, y = indice, color = country)) +
+    theme_minimal() + 
+    labs(x = "", 
+         y = if (bIndex) "2008 = 100" else if (bCapita) "Per Capita" else "in Trillions", 
+         title =title, 
+         subtitle = paste0("In 2022: ", paste(unique(data$country), "(", data$indice[data$year == 2022], ") ", collapse = ", "),
+                     "\nIn 2008: ", paste(unique(data$country), "(", data$indice[data$year == 2008], ") ", collapse = ", "))) +
+    #scale_color_manual(values = c("#003399", "#BF0A30")) +
+    scale_x_date(breaks = seq(2008, 2100,  2) %>% paste0("-01-01") %>% as.Date,
+                 labels = date_format("%Y")) +
+    ggtitle(title) +
+    theme(legend.position = c(0.2, 0.8),
+          legend.title = element_blank())
+  
+  graph
+}
+```
+
+### Unemployment function
+
+```{r UnemploymentTab}
+unemployment <- function(title, indiGDP, countries, indiUnemployment, capitaindicator=NULL) {
+  data <- WDI(country =countries, indicator = indiGDP) %>%
+    mutate(date = paste0(year, "-01-01") %>% as.Date()) %>%
+    filter(year >= 2008) %>%
+    filter(year <= 2022) %>%
+    group_by(country) %>%
+    rename(indicatorGDP = indiGDP)
+  if(!is.null(capitaindicator)) {
+    gdp <- data %>%
+      select(country,year,date,iso2c,iso3c, indicatorGDP)
+    capita <- WDI(country = countries, indicator = capitaindicator) %>%
+      filter(year >= 2008) %>%
+      filter(year <= 2022) %>%
+      rename(indicatorCap = capitaindicator) %>%
+      mutate(date = as.Date(paste0(year, "-01-01"))) %>%
+      select(country,year,date,iso2c,iso3c, indicatorCap)
+    data <- merge(gdp, capita, by = c("country", "year","date", "iso2c","iso3c"))
+    data <- data %>%
+      group_by(country) %>%
+      mutate(indicatorGDP = indicatorGDP/indicatorCap) %>%
+      mutate(indice = round(indicatorGDP, digits = 2)) %>%
+      select(country,year,date,iso2c,iso3c, indicatorGDP)
+   
+    } else{
+      data <- data %>%
+        mutate(indicatorGDP = round(indicatorGDP / 1000000000000,digits = 2)) 
+    }
+  
+  pop <- WDI(country=countries, indicator = indiUnemployment) %>%
+    filter(year >= 2008) %>%
+    filter(year <= 2022) %>%
+    mutate(date = paste0(year, "-01-01") %>% as.Date()) %>%
+    group_by(country) %>%
+    rename(indicatorCap = indiUnemployment)
+  data <- merge(data, pop, by = c("country", "year","date", "iso2c","iso3c")) %>%
+      group_by(country) 
+
+  correlations <- data %>%
+    summarise(correlation = round(cor(indicatorGDP, indicatorCap), digits = 2))
+  
+  subtitle <- paste("Correlation for", paste(unique(correlations$country), ":", correlations$correlation, collapse = ", "))
+  title <- paste("Figure", figurenumber, ":", title)
+  graph <- data %>%
+    ggplot() +
+    geom_point(aes(x = indicatorGDP, y = indicatorCap, color = country)) +
+    geom_smooth(aes(x = indicatorGDP, y = indicatorCap, color = country), method = "lm", se = FALSE) + 
+
+    labs(title = title,
+         x = if(is.null(capitaindicator))"GDP in Trillion (Total Value)" else "GDP per Capita",
+         y = "Unemployment (%)",
+         subtitle = subtitle)+
+    theme_minimal()+
+    facet_wrap(~country, scales = "free")
+
+  graph
+}
+```
+
+### Population function
+
+```{r PopulationTab}
+population <- function(title, indi, countries, bIndex = FALSE, indexindicator = NULL, bUnemployment = FALSE) {
+  pop <- WDI(country=countries, indicator = indi) %>%
+    filter(year >= 2008) %>%
+    filter(year <= 2022) %>%
+    mutate(date = paste0(year, "-01-01") %>% as.Date()) %>%
+    group_by(country) %>%
+    rename(indicatorCap = indi)
+  if (bIndex) {
+    if (!length(indexindicator)) {
+      pop <- pop %>%
+        mutate(indice = round((100 * indicatorCap / indicatorCap[year == 2008]), digits = 2))
+    } else {
+      pop <- ungroup(pop)
+      pop <- pop %>%
+        mutate(x = indicatorCap[year == 2008 & iso2c == indexindicator]) %>%
+        group_by(country) %>%
+        mutate(indice = round((100 * indicatorCap / x), digits = 2))
+    }
+  } else {
+    if (bUnemployment) {
+      pop <- pop %>%
+        mutate(indice = round(indicatorCap,digits = 2))
+    } else{
+      pop <- pop %>%
+        mutate(indice = round(indicatorCap / 1000000,digits = 2))
+    }
+  }
+  
+  
+  title <- paste("Figure", figurenumber, ":", title)
+  graph <- pop %>%
+    ggplot() + geom_line(aes(x = date, y = indice, color = country)) +
+    theme_minimal() + 
+    labs(x = "", 
+         y = if (bIndex) "2008 = 100" else if(bUnemployment) "in percent" else"in Million", 
+         title =title, 
+         subtitle = paste0("In 2022: ", paste(unique(pop$country), "(", pop$indice[pop$year == 2022], ") ", collapse = ", "),
+                     "\nIn 2008: ", paste(unique(pop$country), "(", pop$indice[pop$year == 2008], ") ", collapse = ", "))) +
+    scale_x_date(breaks = seq(2008, 2100,  2) %>% paste0("-01-01") %>% as.Date,
+                 labels = date_format("%Y")) +
+    ggtitle(title) +
+    theme(legend.position = c(0.2, 0.8),
+          legend.title = element_blank())
+  graph
+}
+```
+:::
+
+## 1 - Replicating
+
+```{r}
+# GDP current US$
+indi = "NY.GDP.MKTP.CD"
+#In Values
+index = FALSE
+title ="GDP (current US$) in total values"
+gdp(title, indi, cEurozoneUS, index)
+figurenumber <<- figurenumber + 1
+#Index of 2008
+index = TRUE
+title <- "GDP (current US$) with index at 2008"
+gdp(title, indi, cEurozoneUS, index)
+figurenumber <<- figurenumber + 1
+# Europe as an Index
+title <- "GDP (current US$) with index at Eurozone in 2008"
+gdp(title, indi, cEurozoneUS, index, "XC")
+figurenumber <<- figurenumber + 1
+```
+
+## 2 -Extending
+
+```{r}
+# Unemployment, total (% of total labor force)
+indi ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment in %"
+population(title, indi, cEurozoneUS, bIndex = FALSE, bUnemployment = TRUE) 
+figurenumber <<- figurenumber + 1
+title <- "Unemployement with index 2008"
+population(title, indi, cEurozoneUS, bIndex = TRUE,bUnemployment = TRUE)
+figurenumber <<- figurenumber + 1
+title <- "Unemployement with index 2008+Eurozone"
+population(title, indi, cEurozoneUS, bIndex = TRUE, indexindicator="XC",bUnemployment = TRUE)
+figurenumber <<- figurenumber + 1
+
+#Population
+indi ="SP.POP.TOTL"
+title <- "Population in total values"
+population(title, indi, cEurozoneUS, bIndex = FALSE) 
+figurenumber <<- figurenumber + 1
+title <- "Population with index 2008"
+population(title, indi, cEurozoneUS, bIndex = TRUE)
+figurenumber <<- figurenumber + 1
+title <- "Population with index 2008+Eurozone"
+population(title, indi, cEurozoneUS, bIndex = TRUE, indexindicator="XC")
+figurenumber <<- figurenumber + 1
+
+#Labor force
+indi ="SL.TLF.TOTL.IN"
+title <- "Labor force in total values"
+population(title, indi, cEurozoneUS, bIndex = FALSE) 
+figurenumber <<- figurenumber + 1
+title <- "Labor force with index 2008"
+population(title, indi, cEurozoneUS, bIndex = TRUE)
+figurenumber <<- figurenumber + 1
+title <- "Labor force with index 2008+Eurozone"
+population(title, indi, cEurozoneUS, bIndex = TRUE, indexindicator="XC")
+figurenumber <<- figurenumber + 1
+```
+
+
+```{r}
+#Labor force and GDP
+indi <- "NY.GDP.MKTP.CD"
+capita <- "SL.TLF.TOTL.IN"
+
+title <- "GDP / laborforce in total values"
+gdp(title, indi, cEurozoneUS, bIndex=FALSE, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+title <- "GDP / laborforce - Index 2008"
+gdp(title, indi, cEurozoneUS, bIndex=TRUE, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+title <- "GDP / laborforce - Index 2008+Eurozone"
+gdp(title, indi, cEurozoneUS, bIndex=TRUE, indexindicator="XC", bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+
+#Population and GDP 
+indi <- "NY.GDP.MKTP.CD"
+capita <- "SP.POP.TOTL"
+
+title <- "GDP / population in total values"
+gdp(title, indi, cEurozoneUS, bIndex=FALSE, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+title <- "GDP / population - Index 2008"
+gdp(title, indi, cEurozoneUS, bIndex=TRUE, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+title <- "GDP / population - Index 2008+Eurozone"
+gdp(title, indi, cEurozoneUS, bIndex=TRUE, indexindicator="XC",bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+#People in Employment and GDP 
+indi <- "NY.GDP.MKTP.CD"
+capita <- "SL.EMP.TOTL"
+
+title <- "GDP / People in Employment in total values"
+gdp(title, indi, cEurozoneUS, bIndex=FALSE, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+title <- "GDP / People in Employment  - Index 2008"
+gdp(title, indi, cEurozoneUS, bIndex=TRUE, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+title <- "GDP / People in Employment  - Index 2008+Eurozone"
+gdp(title, indi, cEurozoneUS, bIndex=TRUE, indexindicator="XC",bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+
+# Unemployment and GDP
+indiGDP <- "NY.GDP.MKTP.CD"
+indiUnemployment ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment and GDP"
+unemployment(title, indiGDP = indiGDP, cEurozoneUS,indiUnemployment = indiUnemployment)
+```
+
+## 3 - Robustness
+
+
+When trying to do comparisons between countries, the [OECD](https://www.oecd.org/fr/sdd/prix-ppa/purchasingpowerparities-frequentlyaskedquestionsfaqs.htm) and [eurostat](https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Beginners:GDP_-_Comparing_GDP:_growth_rate_and_per_capita) recommend a GDP measurement which
+
+1.  takes PPP into account,
+2.  consider the size of the population,
+3.  and lastly to use a constant dollar value.
+
+
+```{r}
+# 1. PPP
+#Total Value
+title ="GDP, PPP (current international $)"
+indi = "NY.GDP.MKTP.PP.CD"
+gdp(title, indi, cEurozoneUS)
+figurenumber <<- figurenumber + 1
+#Index 2008
+index = TRUE
+title <- "GDP, PPP (current US$) with index 2008"
+gdp(title, indi, cEurozoneUS, index)
+figurenumber <<- figurenumber + 1
+# Europe 2008 as an Index
+title <- "GDP,PPP (current US$)  with index Eurozone 2008"
+gdp(title, indi, cEurozoneUS, index, "XC")
+figurenumber <<- figurenumber + 1
+
+# 2. Size of the Population
+#Total Value
+title ="GDP, PPP (current international $) / population"
+indi = "NY.GDP.MKTP.PP.CD"
+capita <- "SP.POP.TOTL"
+gdp(title, indi, cEurozoneUS, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+#Index 2008
+index = TRUE
+title <- "GDP, PPP (current US$) / population with index 2008"
+gdp(title, indi, cEurozoneUS, index, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+# Europe 2008 as an Index
+title <- "GDP. PPP (current US$) / population with index Eurozone 2008"
+gdp(title, indi, cEurozoneUS, index, "XC", bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+
+#3. Constant Dollar / Without Inflation
+#Total Value
+title ="GDP, PPP (constant international $) / population"
+indi = "NY.GDP.MKTP.PP.KD"
+capita <- "SP.POP.TOTL"
+gdp(title, indi, cEurozoneUS, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+#Index 2008
+index = TRUE
+title <- "GDP, PPP (constant US$) / population with index 2008"
+gdp(title, indi, cEurozoneUS, index, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+# Europe 2008 as an Index
+title <- "GDP. PPP (constant US$) / population with index Eurozone 2008"
+gdp(title, indi, cEurozoneUS, index, "XC", bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+```
+
+```{r}
+# Unemployment and GDP
+
+indiGDP <- "NY.GDP.MKTP.PP.CD"
+indiUnemployment ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment and GDP current, ppp"
+unemployment(title, indiGDP = indiGDP, cEurozoneUS,indiUnemployment = indiUnemployment)
+
+indiGDP <- "NY.GDP.MKTP.PP.KD"
+indiUnemployment ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment and GDP constant, ppp"
+unemployment(title, indiGDP = indiGDP, cEurozoneUS,indiUnemployment = indiUnemployment)
+
+indiGDP <- "NY.GDP.MKTP.PP.KD"
+indiUnemployment ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment and GDP constant, ppp / population"
+unemployment(title, indiGDP = indiGDP, cEurozoneUS,indiUnemployment = indiUnemployment, capitaindicator ="SP.POP.TOTL")
+```
+
+## 4 - Breaking it down
+
+
+```{r}
+# Unemployment, total (% of total labor force)
+indi ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment in %"
+population(title, indi, cEurozone, bIndex = FALSE, bUnemployment = TRUE) 
+
+indi ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment in %"
+population(title, indi, cEurozone5, bIndex = FALSE, bUnemployment = TRUE) 
+figurenumber <<- figurenumber + 1
+title <- "Unemployment with index 2008"
+population(title, indi, cEurozone5, bIndex = TRUE,bUnemployment = TRUE)
+figurenumber <<- figurenumber + 1
+
+indiGDP <- "NY.GDP.MKTP.PP.KD"
+indiUnemployment ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment and GDP constant, ppp / population"
+unemployment(title, indiGDP = indiGDP, cEurozone5,indiUnemployment = indiUnemployment, capitaindicator ="SP.POP.TOTL")
+
+#3. Constant Dollar / Without Inflation
+#Total Value
+title ="GDP, PPP (constant international $) / population"
+indi = "NY.GDP.MKTP.PP.KD"
+capita <- "SP.POP.TOTL"
+gdp(title, indi, cEurozone5, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+#Index 2008
+index = TRUE
+title <- "GDP, PPP (constant US$) / population with index 2008"
+gdp(title, indi, cEurozone5, index, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+```
+
+## 5 - Writing a short piece
+
+
+```{r}
+# Unemployment, total (% of total labor force)
+indi ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment in %"
+population(title, indi, cEUUS, bIndex = FALSE, bUnemployment = TRUE) 
+figurenumber <<- figurenumber + 1
+title <- "Unemployment with index 2008"
+population(title, indi, cEUUS, bIndex = TRUE,bUnemployment = TRUE)
+figurenumber <<- figurenumber + 1
+
+indiGDP <- "NY.GDP.MKTP.PP.KD"
+indiUnemployment ="SL.UEM.TOTL.NE.ZS"
+title <- "Unemployment and GDP constant, ppp / population"
+unemployment(title, indiGDP = indiGDP, cEUUS,indiUnemployment = indiUnemployment, capitaindicator ="SP.POP.TOTL")
+
+#3. Constant Dollar / Without Inflation
+#Total Value
+title ="GDP, PPP (constant international $) / population"
+indi = "NY.GDP.MKTP.PP.KD"
+capita <- "SP.POP.TOTL"
+gdp(title, indi, cEUUS, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+#Index 2008
+index = TRUE
+title <- "GDP, PPP (constant US$) / population with index 2008"
+gdp(title, indi, cEUUS, index, bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+# Europe 2008 as an Index
+title <- "GDP. PPP (constant US$) / population with index EU 2008"
+gdp(title, indi, cEUUS, index, "EU", bCapita=TRUE, capitaindicator=capita)
+figurenumber <<- figurenumber + 1
+```
